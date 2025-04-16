@@ -39,10 +39,11 @@ rp = rospkg.RosPack()
 package_path = rp.get_path('cairclient_alterego_vision')
 folder_path = package_path + "/common"
 
-dense_cap = False
+visual_info = False
 log_data = False
+formal_language = False
 
-lab_server = "130.251.13.192"
+lab_server = "130.251.2.192"
 local_server = "130.251.13.122"
 
 # Get the private IP of the computer for the local network
@@ -68,15 +69,16 @@ SILENCE_THRESHOLD = 300
 
 # Port for the Hub and Dialogue Manager using different ontology
 server_port = "12348"
-img_port = "12348"
+vision_port = "12348"
 
-BASE_CAIR_hub = "https://" + server_ip + ":" + server_port + "/CAIR_hub"
-img_url = "http://" + server_ip + ":" + img_port + "/CAIR_dense_captioning"
+BASE_CAIR_HUB_URL = "https://" + server_ip + ":" + server_port + "/CAIR_hub"
+BASE_CAIR_VISION_URL = "http://" + server_ip + ":" + vision_port + "/CAIR_vision"
 
-# If dense captioning is set to false the dense_cap_result will be sent empty to the server and the
+# If dense captioning is set to false the visual_information will be sent empty to the server and the
 # visual information will not be used by gpt-4
-dense_cap_result = []
-
+visual_information = ""
+experiment_id = "exp1C2"
+device_id = "alterego"
 
 def mp3_duration(path):
     try:
@@ -123,8 +125,8 @@ class CAIRclient:
             with open(os.path.join(folder_path, "filler_sentences_" + lan + ".txt")) as f:
                 self.sentences[lan] = [line.rstrip() for line in f]
 
-        self.dense_cap = dense_cap
-        self.dense_cap_result = dense_cap_result
+        self.visual_info = visual_info
+        self.visual_information = visual_information
         self.microphone_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.log_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.log_data = log_data
@@ -204,8 +206,8 @@ class CAIRclient:
             try:
                 # Log the time needed to perform the request and get the response
                 request_start_time = time.time()
-                response = requests.post(img_url, json=data)
-                self.dense_cap_result = response.json()["result"]
+                response = requests.post(BASE_CAIR_VISION_URL, json=data)
+                self.visual_information = response.json()["result"]
                 request_end_time = time.time()
                 to_log = "v#timestamp:" + date_time_str + "\n" \
                          "v#image_capture_time:" + str(image_capture_end_time - image_capture_start_time) + "\n" \
@@ -320,7 +322,7 @@ class CAIRclient:
         start_time = time.time()
         try:
             # Try making the POST request
-            hub_response = requests.post(BASE_CAIR_hub, data=compressed_data, verify=certificate)
+            hub_response = requests.post(BASE_CAIR_HUB_URL, data=compressed_data, verify=certificate)
             end_time = time.time()
 
             # Check if the response is valid
@@ -378,12 +380,12 @@ class CAIRclient:
 
         self.initialize_user_session()
         self.load_conversation_state()
-
+        self.dialogue_state.formal_language = formal_language
         prev_turn_last_speaker = ""
         prev_speaker_topic = ""
 
         # If dense captioning should be used, start the thread to update visual information
-        if self.dense_cap:
+        if self.visual_info:
             self.start_dense_captioning_in_thread()
 
         last_active_speaker_time = time.time()
@@ -541,6 +543,8 @@ class CAIRclient:
 
                 # Compose the payload of the message to be sent to the server
                 data = {"req_type": "reply",
+                	    "experiment_id":experiment_id,
+                        "device_id": device_id,
                         "openai_api_key": openai_api_key,
                         "client_sentence": xml_string, "language": language,
                         "due_intervention": self.due_intervention,
@@ -548,7 +552,7 @@ class CAIRclient:
                         "dialogue_statistics": self.dialogue_statistics.to_dict(),
                         "speakers_info": speakers_info_no_names,
                         "prev_speaker_info": {"id": prev_turn_last_speaker, "topic": prev_speaker_topic},
-                        "dense_cap_result": self.dense_cap_result}
+                        "visual_information": self.visual_information}
 
                 if self.due_intervention["type"] is None:
                     # Update the info about id and topic of previous speaker to the current one
@@ -628,7 +632,7 @@ class CAIRclient:
                 data["req_type"] = "continuation"
                 # print(self.dialogue_state.to_dict())
                 data["dialogue_state"] = self.dialogue_state.to_dict()
-                data["dense_cap_result"] = self.dense_cap_result
+                data["visual_information"] = self.visual_information
                 # Empty the field of the due intervention as it has already been processed by the first request
                 # Create a thread that performs another request to get the continuation of the dialogue
                 req2_thread = threading.Thread(target=self.hub_request, args=(data,))
